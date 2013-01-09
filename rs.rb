@@ -3,10 +3,6 @@ end
 
 class GaloisField
 	def initialize()
-		setupTables()
-	end
-	
-	def setupTables()
 		@gf_exp = [1] * 512
 		@gf_log = [0] * 256
 		x = 1
@@ -28,9 +24,7 @@ class GaloisField
 	def multiply(x, y)
 		return 0 if(x == 0 or y == 0)
 
-		ret = @gf_exp[@gf_log[x] + @gf_log[y]]
-		#puts("gf_mul: x=0x#{x.to_s(16)}, y=0x#{y.to_s(16)}, ret=0x#{ret.to_s(16)}")
-		ret
+		@gf_exp[@gf_log[x] + @gf_log[y]]
 	end
 
 	def divide(x, y)
@@ -41,17 +35,19 @@ class GaloisField
 	end
 
 	def polynomialScale(p, x)
-		p.map() { |i| multiply(i, x) }
+		p.map() do |i| 
+			multiply(i, x) 
+		end
 	end
 
 	def polynomialAdd(p, q)
 		r = [0] * [p.size, q.size].max
 
-		p.size.times() do |i|
+		p.each_index() do |i|
 			r[i + r.size - p.size] = p[i]
 		end
 
-		q.size.times() do |i|
+		q.each_index() do |i|
 			r[i + r.size - q.size] ^= q[i]
 		end
 
@@ -60,10 +56,9 @@ class GaloisField
 
 	def polynomialMultiply(p, q)
 		r = [0] * (p.size + q.size - 1)
-		#puts(p.inspect)
-		#puts(q.inspect)
-		q.size.times() do |j|
-			p.size.times() do |i|
+
+		q.each_index() do |j|
+			p.each_index() do |i|
 				r[i + j] ^= multiply(p[i], q[j])
 			end
 		end
@@ -86,34 +81,31 @@ class GaloisField
 		g = [1]
 		
 		nsym.times() do |i|
-			tomult = [1, @gf_exp[i]]
-			g = polynomialMultiply(g, tomult)
+			g = polynomialMultiply(g, [1, @gf_exp[i]])
 		end
 
 		g
 	end
 
 	def rsEncode(msg, nsym)
-		gen = polynomialGenerator(nsym)
 		msgOut = [0] * (msg.size + nsym)
 
-		msg.size.times() do |i|
+		msg.each_index() do |i|
 			msgOut[i] = msg[i]
 		end
 
-		msg.size.times() do |i|
+		gen = polynomialGenerator(nsym)
+		msg.each_index() do |i|
 			coefficient = msgOut[i]
 
-			gen.size.times() do |j|
+			gen.each_index() do |j|
 				msgOut[j + i] ^= multiply(gen[j], coefficient)
 			end unless(coefficient == 0)
 		end
 
-		msg.size.times() do |i|
+		msg.each_index() do |i|
 			msgOut[i] = msg[i]
 		end
-
-		#debugHexDump(msgOut, "msgOut")
 
 		msgOut
 	end
@@ -121,38 +113,30 @@ class GaloisField
 	def calcSyndromes(msg, nsym)
 		synd = [0] * nsym
 		
-		nsym.times() do |i| 
-			#puts("msg=#{msg.inspect}")
-			ret = polynomialEval(msg, @gf_exp[i]) 
-			#puts("ret=%02x, gf_exp[i]=%02x, i=%d" % [ret, @gf_exp[i], i])
-			synd[i] = ret
+		synd.each_index() do |i|
+			synd[i] = polynomialEval(msg, @gf_exp[i])
 		end
 
-		return synd
+		synd
 	end
 
 	def correctErrata(msg, synd, pos)
 		# calculate error locator polynomial
 		q = [1]
-		pos.size.times() do |i|
+		pos.each_index() do |i|
 			x = @gf_exp[msg.size - 1 - pos[i]]
 			q = polynomialMultiply(q, [x, 1])
 		end
 
-		#puts("q: #{q.inspect}")
-
 		# calculate error evaluator polynomial
 		p = synd[0 .. pos.size - 1]
-		#puts("selected syndromes: #{p.inspect}")
 		p.reverse!()
 		p = polynomialMultiply(p, q)
-		#puts("p: (size=#{p.size}) #{p.inspect}")
 		p = p[p.size - pos.size .. p.size - 1]
-		#puts("p2: (size=#{p.size}) #{p.inspect}")
-		#puts("q: #{q.inspect}")
+
 		# eliminate even terms
 		qsize = q.size
-		#puts("q[#{qsize&1} .. #{qsize - 1}]")
+
 		q = q[qsize & 1 .. qsize - 1]
 		q1 = []
 		q.each_index() do |i|
@@ -160,10 +144,8 @@ class GaloisField
 		end
 		q = q1
 
-		#puts("q after every-second filtering: #{qsize & 1} #{q.inspect}")
-		#
 		# compute corrections
-		pos.size.times() do |i|
+		pos.each_index() do |i|
 			x = @gf_exp[pos[i] + 256 - msg.size]
 			y = polynomialEval(p, x)
 			z = polynomialEval(q, multiply(x, x))
@@ -181,7 +163,6 @@ class GaloisField
 			delta = synd[i]
 
 			1.upto(errPoly.size - 1) do |j|
-				#puts("synd[%d]=%02x" % [ i - j, synd[i - j] ])
 				delta ^= multiply(errPoly[errPoly.size - 1 - j], synd[i - j])
 			end
 
@@ -197,30 +178,25 @@ class GaloisField
 		end
 
 		errs = errPoly.size - 1
-		if(errs * 2 > synd.size)
-			# Too many errors to correct
-			return nil
-		end
+
+		# Too many errors to correct
+		return nil if(errs * 2 > synd.size)
 
 		# Find zeros of error polynomial
 		errPos = []
 		nmess.times() do |i|
-			if(polynomialEval(errPoly, @gf_exp[255 - i]) == 0)
-				errPos << nmess - 1 - i
-			end
+			errPos << nmess - 1 - i if(polynomialEval(errPoly, @gf_exp[255 - i]) == 0)
 		end
 
-		if(errPos.size != errs)
-			# can't find error locations (?)
-			#puts("errPos.size=#{errPos.size}, errs=#{errs}")
-			return nil
-		end
+		# can't find error locations (?)
+		return nil if(errPos.size != errs)
 
-		return errPos
+		errPos
 	end
 
 	def forneySyndromes(synd, pos, nmess)
 		fsynd = synd.dup()
+
 		pos.each_index() do |i|
 			x = @gf_exp[nmess - 1 - pos[i]]
 
@@ -230,7 +206,8 @@ class GaloisField
 
 			fdynd.pop()
 		end
-		return fsynd
+
+		fsynd
 	end
 
 	def correctMessage(msgIn, nsym)
@@ -244,35 +221,20 @@ class GaloisField
 			end
 		end
 
-		if(erasePos.size > nsym)
-			# too many erasures
-			puts("too many erasures")
-			return nil
-		end
+		# too many erasures
+		return nil if(erasePos.size > nsym)
 
 		synd = calcSyndromes(msgOut, nsym)
-		if(synd.max() == 0)
-			# no errors detected?
-			#puts("no errors detected")
-			return msgOut
-		end
+		return msgOut if(synd.max() == 0) # no errors detected?
 
 		fsynd = forneySyndromes(synd, erasePos, msgOut.size)
 		errPos = findErrors(fsynd, msgOut.size)
-		if(errPos == nil)
-			# error location failed
-			#puts("error location failed")
-			return nil
-		end
+		return nil if(errPos == nil) # error location failed
 
 		correctErrata(msgOut, synd, erasePos + errPos)
 		synd = calcSyndromes(msgOut, nsym)
-		if(synd.max() > 0)
-			# message still not right
-			#puts("message still not right: synd.size = #{synd.size}")
-			return nil
-		end
+		return nil if(synd.max() > 0) # message still not right
 
-		return msgOut
+		msgOut
 	end
 end
