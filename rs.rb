@@ -1,9 +1,14 @@
+# antekone
+# http://anadoxin.org/blog
+
 class ZeroDivisionError
 end
 
 class GaloisField
+	attr_reader(:gf_exp, :gf_log, :gf_exp_orig)
 	def initialize()
 		@gf_exp = [1] * 512
+		@gf_exp_orig = [1] * 256
 		@gf_log = [0] * 256
 		x = 1
 
@@ -13,6 +18,7 @@ class GaloisField
 			x = x ^ 0x11D if(x & 0x100 != 0) # in GF(2**8) subtraction is done by XOR
 
 			@gf_exp[i] = x
+			@gf_exp_orig[i] = x
 			@gf_log[x] = i
 		end
 
